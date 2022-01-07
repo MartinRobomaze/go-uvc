@@ -96,6 +96,27 @@ func (dev *Device) GetAddress() uint8 {
 	return uint8(C.uvc_get_device_address(dev.dev))
 }
 
+func (dev *Device) GetFormatDesc() *FormatDescriptor {
+	desc := C.uvc_get_format_descs(dev.handle)
+	if desc == nil {
+		return nil
+	}
+	return &FormatDescriptor{
+		desc:                desc,
+		Subtype:             VSDescSubType(desc.bDescriptorSubtype),
+		FormatIndex:         uint8(desc.bFormatIndex),
+		NumFrameDescriptors: uint8(desc.bNumFrameDescriptors),
+		BitsPerPixel:        *(*uint8)(unsafe.Pointer(&desc.anon1[0])),
+		Flags:               *(*uint8)(unsafe.Pointer(&desc.anon1[0])),
+		DefaultFrameIndex:   uint8(desc.bDefaultFrameIndex),
+		AspectRatioX:        uint8(desc.bAspectRatioX),
+		AspectRatioY:        uint8(desc.bAspectRatioY),
+		InterlaceFlags:      uint8(desc.bmInterlaceFlags),
+		CopyProtect:         uint8(desc.bCopyProtect),
+		VariableSize:        uint8(desc.bVariableSize),
+	}
+}
+
 func (dev *Device) ControlInterface() *ControlInterface {
 	dev.mu.RLock()
 	defer dev.mu.RUnlock()

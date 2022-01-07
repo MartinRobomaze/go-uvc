@@ -94,21 +94,18 @@ enum uvc_frame_format {
    */
   UVC_FRAME_FORMAT_YUYV,
   UVC_FRAME_FORMAT_UYVY,
+  UVC_FRAME_FORMAT_I420,
+  UVC_FRAME_FORMAT_NV12,
   /** 24-bit RGB */
   UVC_FRAME_FORMAT_RGB,
   UVC_FRAME_FORMAT_BGR,
+  /** 16-bit RGB */
+  UVC_FRAME_FORMAT_RGBR,
   /** Motion-JPEG (or JPEG) encoded images */
   UVC_FRAME_FORMAT_MJPEG,
-  /** Greyscale images */
   UVC_FRAME_FORMAT_GRAY8,
-  UVC_FRAME_FORMAT_GRAY16,
-  /* Raw colour mosaic images */
   UVC_FRAME_FORMAT_BY8,
-  UVC_FRAME_FORMAT_BA81,
-  UVC_FRAME_FORMAT_SGRBG8,
-  UVC_FRAME_FORMAT_SGBRG8,
-  UVC_FRAME_FORMAT_SRGGB8,
-  UVC_FRAME_FORMAT_SBGGR8,
+  UVC_FRAME_FORMAT_Y16,
   /** Number of formats understood */
   UVC_FRAME_FORMAT_COUNT,
 };
@@ -120,11 +117,12 @@ enum uvc_frame_format {
 #define UVC_COLOR_FORMAT_COMPRESSED UVC_FRAME_FORMAT_COMPRESSED
 #define UVC_COLOR_FORMAT_YUYV UVC_FRAME_FORMAT_YUYV
 #define UVC_COLOR_FORMAT_UYVY UVC_FRAME_FORMAT_UYVY
+#define UVC_COLOR_FORMAT_I420 UVC_FRAME_FORMAT_I420
 #define UVC_COLOR_FORMAT_RGB UVC_FRAME_FORMAT_RGB
 #define UVC_COLOR_FORMAT_BGR UVC_FRAME_FORMAT_BGR
 #define UVC_COLOR_FORMAT_MJPEG UVC_FRAME_FORMAT_MJPEG
 #define UVC_COLOR_FORMAT_GRAY8 UVC_FRAME_FORMAT_GRAY8
-#define UVC_COLOR_FORMAT_GRAY16 UVC_FRAME_FORMAT_GRAY16
+#define UVC_COLOR_FORMAT_Y16 UVC_FRAME_FORMAT_Y16
 
 /** VideoStreaming interface descriptor subtype (A.6) */
 enum uvc_vs_desc_subtype {
@@ -747,10 +745,12 @@ uvc_error_t uvc_duplicate_frame(uvc_frame_t *in, uvc_frame_t *out);
 
 uvc_error_t uvc_yuyv2rgb(uvc_frame_t *in, uvc_frame_t *out);
 uvc_error_t uvc_uyvy2rgb(uvc_frame_t *in, uvc_frame_t *out);
+uvc_error_t uvc_i4202rgb(uvc_frame_t *in, uvc_frame_t *out);
 uvc_error_t uvc_any2rgb(uvc_frame_t *in, uvc_frame_t *out);
 
 uvc_error_t uvc_yuyv2bgr(uvc_frame_t *in, uvc_frame_t *out);
 uvc_error_t uvc_uyvy2bgr(uvc_frame_t *in, uvc_frame_t *out);
+uvc_error_t uvc_i4202bgr(uvc_frame_t *in, uvc_frame_t *out);
 uvc_error_t uvc_any2bgr(uvc_frame_t *in, uvc_frame_t *out);
 
 uvc_error_t uvc_yuyv2y(uvc_frame_t *in, uvc_frame_t *out);
@@ -1476,7 +1476,11 @@ typedef struct uvc_device_info {
   We could/should change this to allow reduce it to, say, 5 by default
   and then allow the user to change the number of buffers as required.
  */
-#define LIBUVC_NUM_TRANSFER_BUFS 100
+#ifdef __APPLE__
+#define LIBUVC_NUM_TRANSFER_BUFS 8
+#else
+#define LIBUVC_NUM_TRANSFER_BUFS 8
+#endif
 
 #define LIBUVC_XFER_BUF_SIZE	( 16 * 1024 * 1024 )
 
@@ -1532,7 +1536,6 @@ struct uvc_device_handle {
   uvc_stream_handle_t *streams;
   /** Whether the camera is an iSight that sends one header per frame */
   uint8_t is_isight;
-  uint32_t claimed;
 };
 
 /** Context within which we communicate with devices */

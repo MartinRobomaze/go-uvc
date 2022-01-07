@@ -33,13 +33,9 @@ extern "C" {
 #endif
 
 #include <stdio.h> // FILE
-#include <stdint.h>
-#include <sys/time.h>
-// #include <libuvc/libuvc_config.h>
-
-struct libusb_context;
-struct libusb_device_handle;
-
+#include <libusb-1.0/libusb.h>
+#include <libuvc/libuvc_config.h>
+#include <errno.h>
 /** UVC error types, based on libusb errors
  * @ingroup diag
  */
@@ -94,21 +90,18 @@ enum uvc_frame_format {
    */
   UVC_FRAME_FORMAT_YUYV,
   UVC_FRAME_FORMAT_UYVY,
+  UVC_FRAME_FORMAT_I420,
+  UVC_FRAME_FORMAT_NV12,
   /** 24-bit RGB */
   UVC_FRAME_FORMAT_RGB,
   UVC_FRAME_FORMAT_BGR,
+  /** 16-bit RGB */
+  UVC_FRAME_FORMAT_RGBR,
   /** Motion-JPEG (or JPEG) encoded images */
   UVC_FRAME_FORMAT_MJPEG,
-  /** Greyscale images */
   UVC_FRAME_FORMAT_GRAY8,
-  UVC_FRAME_FORMAT_GRAY16,
-  /* Raw colour mosaic images */
   UVC_FRAME_FORMAT_BY8,
-  UVC_FRAME_FORMAT_BA81,
-  UVC_FRAME_FORMAT_SGRBG8,
-  UVC_FRAME_FORMAT_SGBRG8,
-  UVC_FRAME_FORMAT_SRGGB8,
-  UVC_FRAME_FORMAT_SBGGR8,
+  UVC_FRAME_FORMAT_Y16,
   /** Number of formats understood */
   UVC_FRAME_FORMAT_COUNT,
 };
@@ -120,11 +113,12 @@ enum uvc_frame_format {
 #define UVC_COLOR_FORMAT_COMPRESSED UVC_FRAME_FORMAT_COMPRESSED
 #define UVC_COLOR_FORMAT_YUYV UVC_FRAME_FORMAT_YUYV
 #define UVC_COLOR_FORMAT_UYVY UVC_FRAME_FORMAT_UYVY
+#define UVC_COLOR_FORMAT_I420 UVC_FRAME_FORMAT_I420
 #define UVC_COLOR_FORMAT_RGB UVC_FRAME_FORMAT_RGB
 #define UVC_COLOR_FORMAT_BGR UVC_FRAME_FORMAT_BGR
 #define UVC_COLOR_FORMAT_MJPEG UVC_FRAME_FORMAT_MJPEG
 #define UVC_COLOR_FORMAT_GRAY8 UVC_FRAME_FORMAT_GRAY8
-#define UVC_COLOR_FORMAT_GRAY16 UVC_FRAME_FORMAT_GRAY16
+#define UVC_COLOR_FORMAT_Y16 UVC_FRAME_FORMAT_Y16
 
 /** VideoStreaming interface descriptor subtype (A.6) */
 enum uvc_vs_desc_subtype {
@@ -540,7 +534,7 @@ uvc_error_t uvc_open(
 void uvc_close(uvc_device_handle_t *devh);
 
 uvc_device_t *uvc_get_device(uvc_device_handle_t *devh);
-struct libusb_device_handle *uvc_get_libusb_handle(uvc_device_handle_t *devh);
+libusb_device_handle *uvc_get_libusb_handle(uvc_device_handle_t *devh);
 
 void uvc_ref_device(uvc_device_t *dev);
 void uvc_unref_device(uvc_device_t *dev);
@@ -594,6 +588,7 @@ uvc_error_t uvc_stream_ctrl(uvc_stream_handle_t *strmh, uvc_stream_ctrl_t *ctrl)
 uvc_error_t uvc_stream_start(uvc_stream_handle_t *strmh,
     uvc_frame_callback_t *cb,
     void *user_ptr,
+    float bandwidth_factor,
     uint8_t flags);
 uvc_error_t uvc_stream_start_iso(uvc_stream_handle_t *strmh,
     uvc_frame_callback_t *cb,
@@ -747,10 +742,12 @@ uvc_error_t uvc_duplicate_frame(uvc_frame_t *in, uvc_frame_t *out);
 
 uvc_error_t uvc_yuyv2rgb(uvc_frame_t *in, uvc_frame_t *out);
 uvc_error_t uvc_uyvy2rgb(uvc_frame_t *in, uvc_frame_t *out);
+uvc_error_t uvc_i4202rgb(uvc_frame_t *in, uvc_frame_t *out);
 uvc_error_t uvc_any2rgb(uvc_frame_t *in, uvc_frame_t *out);
 
 uvc_error_t uvc_yuyv2bgr(uvc_frame_t *in, uvc_frame_t *out);
 uvc_error_t uvc_uyvy2bgr(uvc_frame_t *in, uvc_frame_t *out);
+uvc_error_t uvc_i4202bgr(uvc_frame_t *in, uvc_frame_t *out);
 uvc_error_t uvc_any2bgr(uvc_frame_t *in, uvc_frame_t *out);
 
 uvc_error_t uvc_yuyv2y(uvc_frame_t *in, uvc_frame_t *out);
@@ -765,8 +762,6 @@ uvc_error_t uvc_mjpeg2rgb(uvc_frame_t *in, uvc_frame_t *out);
 #endif
 
 #endif // !def(LIBUVC_H)
-
-/*------"ulist.h"------*/
 
 /*
 Copyright (c) 2007-2010, Troy D. Hanson   http://uthash.sourceforge.net
@@ -1258,8 +1253,6 @@ do {                                                                            
 
 #endif /* UTLIST_H */
 
-/*------"libuvc/libuvc_internal.h"------*/
-
 /** @file libuvc_internal.h
   * @brief Implementation-specific UVC constants and structures.
   * @cond include_hidden
@@ -1273,7 +1266,7 @@ do {                                                                            
 #include <string.h>
 #include <pthread.h>
 #include <signal.h>
-#include <libusb.h>
+
 // #include "utlist.h"
 
 /** Converts an unaligned four-byte little-endian integer into an int32 */
@@ -1476,7 +1469,11 @@ typedef struct uvc_device_info {
   We could/should change this to allow reduce it to, say, 5 by default
   and then allow the user to change the number of buffers as required.
  */
-#define LIBUVC_NUM_TRANSFER_BUFS 100
+#ifdef __APPLE__
+#define LIBUVC_NUM_TRANSFER_BUFS 8
+#else
+#define LIBUVC_NUM_TRANSFER_BUFS 8
+#endif
 
 #define LIBUVC_XFER_BUF_SIZE	( 16 * 1024 * 1024 )
 
@@ -1532,7 +1529,6 @@ struct uvc_device_handle {
   uvc_stream_handle_t *streams;
   /** Whether the camera is an iSight that sends one header per frame */
   uint8_t is_isight;
-  uint32_t claimed;
 };
 
 /** Context within which we communicate with devices */
@@ -1559,69 +1555,6 @@ uvc_error_t uvc_release_if(uvc_device_handle_t *devh, int idx);
 
 #endif // !def(LIBUVC_INTERNAL_H)
 /** @endcond */
-
-/*------misc.c------*/
-
-/*********************************************************************
-* Software License Agreement (BSD License)
-*
-*  Copyright (C) 2010-2012 Ken Tossell
-*  All rights reserved.
-*
-*  Redistribution and use in source and binary forms, with or without
-*  modification, are permitted provided that the following conditions
-*  are met:
-*
-*   * Redistributions of source code must retain the above copyright
-*     notice, this list of conditions and the following disclaimer.
-*   * Redistributions in binary form must reproduce the above
-*     copyright notice, this list of conditions and the following
-*     disclaimer in the documentation and/or other materials provided
-*     with the distribution.
-*   * Neither the name of the author nor other contributors may be
-*     used to endorse or promote products derived from this software
-*     without specific prior written permission.
-*
-*  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-*  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-*  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-*  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-*  COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
-*  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-*  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-*  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-*  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-*  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-*  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-*  POSSIBILITY OF SUCH DAMAGE.
-*********************************************************************/
-/*
-#include <string.h>
-#include <stdlib.h>
-*/
-
-#if __APPLE__
-char *strndup(const char *s, size_t n) {
-  size_t src_n = 0;
-  const char *sp = s;
-  char *d;
-
-  while (*sp++)
-    src_n++;
-
-  if (src_n < n)
-    n = src_n;
-
-  d = malloc(n + 1);
-
-  memcpy(d, s, n);
-  
-  d[n] = '\0';
-
-  return d;
-}
-#endif
-
 
 /*------init.c------*/
 
@@ -1702,7 +1635,6 @@ YUV stream from a UVC device such as a standard webcam.
  * @defgroup init Library initialization/deinitialization
  * @brief Setup routines used to construct UVC access contexts
  */
-
 /*
 #include "libuvc/libuvc.h"
 #include "libuvc/libuvc_internal.h"
@@ -1830,12 +1762,10 @@ void uvc_start_handler_thread(uvc_context_t *ctx) {
  * @defgroup device Device handling and enumeration
  * @brief Support for finding, inspecting and opening UVC devices
  */
-
 /*
 #include "libuvc/libuvc.h"
 #include "libuvc/libuvc_internal.h"
 */
-
 int uvc_already_open(uvc_context_t *ctx, struct libusb_device *usb_dev);
 void uvc_free_devh(uvc_device_handle_t *devh);
 
@@ -2358,6 +2288,7 @@ void uvc_free_device_descriptor(
 uvc_error_t uvc_get_device_list(
     uvc_context_t *ctx,
     uvc_device_t ***list) {
+  uvc_error_t ret;
   struct libusb_device **usb_dev_list;
   struct libusb_device *usb_dev;
   int num_usb_devices;
@@ -2367,6 +2298,7 @@ uvc_error_t uvc_get_device_list(
 
   /* per device */
   int dev_idx;
+  struct libusb_device_handle *usb_devh;
   struct libusb_config_descriptor *config;
   struct libusb_device_descriptor desc;
   uint8_t got_interface;
@@ -2395,6 +2327,7 @@ uvc_error_t uvc_get_device_list(
   dev_idx = -1;
 
   while ((usb_dev = usb_dev_list[++dev_idx]) != NULL) {
+    usb_devh = NULL;
     got_interface = 0;
 
     if (libusb_get_config_descriptor(usb_dev, 0, &config) != 0)
@@ -2403,37 +2336,26 @@ uvc_error_t uvc_get_device_list(
     if ( libusb_get_device_descriptor ( usb_dev, &desc ) != LIBUSB_SUCCESS )
       continue;
 
-    for (interface_idx = 0;
-	 !got_interface && interface_idx < config->bNumInterfaces;
-	 ++interface_idx) {
-      interface = &config->interface[interface_idx];
+    // Special case for Imaging Source cameras
+    if ( 0x199e == desc.idVendor && 0x8101 == desc.idProduct ) {
+      got_interface = 1;
+    } else {
 
-      for (altsetting_idx = 0;
-	   !got_interface && altsetting_idx < interface->num_altsetting;
-	   ++altsetting_idx) {
-	if_desc = &interface->altsetting[altsetting_idx];
+      for (interface_idx = 0;
+	   !got_interface && interface_idx < config->bNumInterfaces;
+	   ++interface_idx) {
+        interface = &config->interface[interface_idx];
 
-        // Skip TIS cameras that definitely aren't UVC even though they might
-        // look that way
+        for (altsetting_idx = 0;
+	     !got_interface && altsetting_idx < interface->num_altsetting;
+	     ++altsetting_idx) {
+	  if_desc = &interface->altsetting[altsetting_idx];
 
-        if ( 0x199e == desc.idVendor && desc.idProduct  >= 0x8201 &&
-            desc.idProduct <= 0x8208 ) {
-          continue;
+	  /* Video, Streaming */
+	  if (if_desc->bInterfaceClass == 14 && if_desc->bInterfaceSubClass == 2) {
+	    got_interface = 1;
+	  }
         }
-
-        // Special case for Imaging Source cameras
-	/* Video, Streaming */
-        if ( 0x199e == desc.idVendor && ( 0x8101 == desc.idProduct ||
-            0x8102 == desc.idProduct ) &&
-            if_desc->bInterfaceClass == 255 &&
-            if_desc->bInterfaceSubClass == 2 ) {
-	  got_interface = 1;
-	}
-
-	/* Video, Streaming */
-	if (if_desc->bInterfaceClass == 14 && if_desc->bInterfaceSubClass == 2) {
-	  got_interface = 1;
-	}
       }
     }
 
@@ -2650,15 +2572,9 @@ void uvc_unref_device(uvc_device_t *dev) {
  * @param idx UVC interface index
  */
 uvc_error_t uvc_claim_if(uvc_device_handle_t *devh, int idx) {
-  int ret = UVC_SUCCESS;
+  int ret;
 
   UVC_ENTER();
-
-  if ( devh->claimed & ( 1 << idx )) {
-    fprintf ( stderr, "attempt to claim already-claimed interface %d\n", idx );
-    UVC_EXIT(ret);
-    return ret;
-  }
 
   /* Tell libusb to detach any active kernel drivers. libusb will keep track of whether
    * it found a kernel driver for this interface. */
@@ -2666,9 +2582,7 @@ uvc_error_t uvc_claim_if(uvc_device_handle_t *devh, int idx) {
 
   if (ret == UVC_SUCCESS || ret == LIBUSB_ERROR_NOT_FOUND || ret == LIBUSB_ERROR_NOT_SUPPORTED) {
     UVC_DEBUG("claiming interface %d", idx);
-    if (!( ret = libusb_claim_interface(devh->usb_devh, idx))) {
-      devh->claimed |= ( 1 << idx );
-    }
+    ret = libusb_claim_interface(devh->usb_devh, idx);
   } else {
     UVC_DEBUG("not claiming interface %d: unable to detach kernel driver (%s)",
               idx, uvc_strerror(ret));
@@ -2686,16 +2600,10 @@ uvc_error_t uvc_claim_if(uvc_device_handle_t *devh, int idx) {
  * @param idx UVC interface index
  */
 uvc_error_t uvc_release_if(uvc_device_handle_t *devh, int idx) {
-  int ret = UVC_SUCCESS;
+  int ret;
 
   UVC_ENTER();
   UVC_DEBUG("releasing interface %d", idx);
-  if (!( devh->claimed & ( 1 << idx ))) {
-    fprintf ( stderr, "attempt to release unclaimed interface %d\n", idx );
-    UVC_EXIT(ret);
-    return ret;
-  }
-
   /* libusb_release_interface *should* reset the alternate setting to the first available,
      but sometimes (e.g. on Darwin) it doesn't. Thus, we do it explicitly here.
      This is needed to de-initialize certain cameras. */
@@ -2703,7 +2611,6 @@ uvc_error_t uvc_release_if(uvc_device_handle_t *devh, int idx) {
   ret = libusb_release_interface(devh->usb_devh, idx);
 
   if (UVC_SUCCESS == ret) {
-    devh->claimed &= ~( 1 << idx );
     /* Reattach any kernel drivers that were disabled when we claimed this interface */
     ret = libusb_attach_kernel_driver(devh->usb_devh, idx);
 
@@ -2737,23 +2644,25 @@ uvc_error_t uvc_scan_control(uvc_device_t *dev, uvc_device_info_t *info) {
   ret = UVC_SUCCESS;
   if_desc = NULL;
 
-  uvc_device_descriptor_t* dev_desc;
-  int haveTISCamera = 0;
-  uvc_get_device_descriptor ( dev, &dev_desc );
-  if ( 0x199e == dev_desc->idVendor && ( 0x8101 == dev_desc->idProduct ||
-      0x8102 == dev_desc->idProduct )) {
-    haveTISCamera = 1;
-  }
-  uvc_free_device_descriptor ( dev_desc );
-
   for (interface_idx = 0; interface_idx < info->config->bNumInterfaces; ++interface_idx) {
     if_desc = &info->config->interface[interface_idx].altsetting[0];
 
-    if ( haveTISCamera && if_desc->bInterfaceClass == 255 && if_desc->bInterfaceSubClass == 1) // Video, Control
-      break;
-
     if (if_desc->bInterfaceClass == 14 && if_desc->bInterfaceSubClass == 1) // Video, Control
       break;
+
+    // Another TIS camera hack.
+    if ( if_desc->bInterfaceClass == 255 && if_desc->bInterfaceSubClass == 1 ) {
+      uvc_device_descriptor_t* dev_desc;
+      int haveTISCamera = 0;
+      uvc_get_device_descriptor ( dev, &dev_desc );
+      if ( dev_desc->idVendor == 0x199e && dev_desc->idProduct == 0x8101 ) {
+        haveTISCamera = 1;
+      }
+      uvc_free_device_descriptor ( dev_desc );
+      if ( haveTISCamera ) {
+        break;
+      }
+    }
 
     if_desc = NULL;
   }
@@ -2900,6 +2809,7 @@ uvc_error_t uvc_parse_vc_selector_unit(uvc_device_t *dev,
 					 uvc_device_info_t *info,
 					 const unsigned char *block, size_t block_size) {
   uvc_selector_unit_t *unit;
+  size_t i;
 
   UVC_ENTER();
 
@@ -3261,12 +3171,6 @@ uvc_error_t uvc_parse_vs(
   case UVC_VS_INPUT_HEADER:
     ret = uvc_parse_vs_input_header(stream_if, block, block_size);
     break;
-  case UVC_VS_OUTPUT_HEADER:
-    fprintf ( stderr, "unsupported descriptor subtype VS_OUTPUT_HEADER\n" );
-    break;
-  case UVC_VS_STILL_IMAGE_FRAME:
-    fprintf ( stderr, "unsupported descriptor subtype VS_STILL_IMAGE_FRAME\n" );
-    break;
   case UVC_VS_FORMAT_UNCOMPRESSED:
     ret = uvc_parse_vs_format_uncompressed(stream_if, block, block_size);
     break;
@@ -3277,27 +3181,16 @@ uvc_error_t uvc_parse_vs(
   case UVC_VS_FRAME_MJPEG:
     ret = uvc_parse_vs_frame_uncompressed(stream_if, block, block_size);
     break;
-  case UVC_VS_FORMAT_MPEG2TS:
-    fprintf ( stderr, "unsupported descriptor subtype VS_FORMAT_MPEG2TS\n" );
-    break;
-  case UVC_VS_FORMAT_DV:
-    fprintf ( stderr, "unsupported descriptor subtype VS_FORMAT_DV\n" );
-    break;
-  case UVC_VS_COLORFORMAT:
-    fprintf ( stderr, "unsupported descriptor subtype VS_COLORFORMAT\n" );
-    break;
   case UVC_VS_FORMAT_FRAME_BASED:
     ret = uvc_parse_vs_frame_format ( stream_if, block, block_size );
     break;
   case UVC_VS_FRAME_FRAME_BASED:
     ret = uvc_parse_vs_frame_frame ( stream_if, block, block_size );
     break;
-  case UVC_VS_FORMAT_STREAM_BASED:
-    fprintf ( stderr, "unsupported descriptor subtype VS_FORMAT_STREAM_BASED\n" );
-    break;
   default:
     /** @todo handle JPEG and maybe still frames or even DV... */
-    //fprintf ( stderr, "unsupported descriptor subtype: %d\n",descriptor_subtype );
+    // fprintf ( stderr, "unsupported descriptor subtype: %d\n",
+        // descriptor_subtype );
     break;
   }
 
@@ -3536,10 +3429,7 @@ void LIBUSB_CALL _uvc_status_callback(struct libusb_transfer *transfer) {
     break;
   }
 
-#ifdef UVC_DEBUGGING
-  uvc_error_t ret =
-#endif
-      libusb_submit_transfer(transfer);
+  uvc_error_t ret = libusb_submit_transfer(transfer);
   UVC_DEBUG("libusb_submit_transfer() = %d", ret);
 
   UVC_EXIT_VOID();
@@ -3589,7 +3479,6 @@ const uvc_format_desc_t *uvc_get_format_descs(uvc_device_handle_t *devh) {
 /*------ctrl-gen.c------*/
 
 /* This is an AUTO-GENERATED file! Update it with the output of `ctrl-gen.py def`. */
-
 /*
 #include "libuvc/libuvc.h"
 #include "libuvc/libuvc_internal.h"
@@ -5898,10 +5787,8 @@ uvc_error_t uvc_set_input_select(uvc_device_handle_t *devh, uint8_t selector) {
 #include "libuvc/libuvc_internal.h"
 */
 
-/*
-static const int REQ_TYPE_SET = 0x21;
-static const int REQ_TYPE_GET = 0xa1;
-*/
+//static const int REQ_TYPE_SET = 0x21;
+//static const int REQ_TYPE_GET = 0xa1;
 
 /***** GENERIC CONTROLS *****/
 /**
@@ -6061,12 +5948,14 @@ uvc_error_t uvc_set_power_mode(uvc_device_handle_t *devh, enum uvc_device_power_
  * @defgroup streaming Streaming control functions
  * @brief Tools for creating, managing and consuming video streams
  */
-
 /*
 #include "libuvc/libuvc.h"
 #include "libuvc/libuvc_internal.h"
 */
-#include "errno.h"
+
+#ifdef __APPLE__
+    #include "time_mac.h"
+#endif
 
 #ifdef _MSC_VER
 
@@ -6128,29 +6017,27 @@ struct format_table_entry *_get_format_entry(enum uvc_frame_format format) {
     ABS_FMT(UVC_FRAME_FORMAT_ANY, 2,
       {UVC_FRAME_FORMAT_UNCOMPRESSED, UVC_FRAME_FORMAT_COMPRESSED})
 
-    ABS_FMT(UVC_FRAME_FORMAT_UNCOMPRESSED, 4,
-      {UVC_FRAME_FORMAT_YUYV, UVC_FRAME_FORMAT_UYVY, UVC_FRAME_FORMAT_GRAY8,
-      UVC_FRAME_FORMAT_GRAY16})
+    ABS_FMT(UVC_FRAME_FORMAT_UNCOMPRESSED, 7,
+      {UVC_FRAME_FORMAT_YUYV, UVC_FRAME_FORMAT_UYVY, UVC_FRAME_FORMAT_RGB, UVC_FRAME_FORMAT_I420, UVC_FRAME_FORMAT_NV12, UVC_FRAME_FORMAT_RGBR, UVC_FRAME_FORMAT_GRAY8})
     FMT(UVC_FRAME_FORMAT_YUYV,
       {'Y',  'U',  'Y',  '2', 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
     FMT(UVC_FRAME_FORMAT_UYVY,
       {'U',  'Y',  'V',  'Y', 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
+    FMT(UVC_FRAME_FORMAT_RGB,
+      {0x7d, 0xeb, 0x36, 0xe4, 0x4f, 0x52, 0xce, 0x11, 0x9f, 0x53, 0x00, 0x20, 0xaf, 0x0b, 0xa7, 0x70})
+    FMT(UVC_FRAME_FORMAT_I420,
+      {'I',  '4',  '2',  '0', 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
+    FMT(UVC_FRAME_FORMAT_NV12,
+      {'N',  'V',  '1',  '2', 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
+    FMT(UVC_FRAME_FORMAT_RGBR,
+      {'R',  'G',  'B',  'R', 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
     FMT(UVC_FRAME_FORMAT_GRAY8,
-      {'Y',  '8',  '0',  '0', 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
-    FMT(UVC_FRAME_FORMAT_GRAY16,
-      {'Y',  '1',  '6',  ' ', 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
+      {'Y',  '8',  ' ',  ' ', 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
     FMT(UVC_FRAME_FORMAT_BY8,
       {'B',  'Y',  '8',  ' ', 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
-    FMT(UVC_FRAME_FORMAT_BA81,
-      {'B',  'A',  '8',  '1', 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
-    FMT(UVC_FRAME_FORMAT_SGRBG8,
-      {'G',  'R',  'B',  'G', 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
-    FMT(UVC_FRAME_FORMAT_SGBRG8,
-      {'G',  'B',  'R',  'G', 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
-    FMT(UVC_FRAME_FORMAT_SRGGB8,
-      {'R',  'G',  'G',  'B', 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
-    FMT(UVC_FRAME_FORMAT_SBGGR8,
-      {'B',  'G',  'G',  'R', 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
+    FMT(UVC_FRAME_FORMAT_Y16,
+      {'Y',  '1',  '6',  ' ', 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
+
     ABS_FMT(UVC_FRAME_FORMAT_COMPRESSED, 1,
       {UVC_FRAME_FORMAT_MJPEG})
     FMT(UVC_FRAME_FORMAT_MJPEG,
@@ -6280,9 +6167,10 @@ uvc_error_t uvc_query_stream_ctrl(
       ctrl->bMinVersion = buf[32];
       ctrl->bMaxVersion = buf[33];
       /** @todo support UVC 1.1 */
-    }
+      }
     else
       ctrl->dwClockFrequency = devh->info->ctrl_if.dwClockFrequency;
+    }
 
     /* fix up block for cameras that fail to set dwMax* */
     if (ctrl->dwMaxVideoFrameSize == 0) {
@@ -6292,7 +6180,6 @@ uvc_error_t uvc_query_stream_ctrl(
         ctrl->dwMaxVideoFrameSize = frame->dwMaxVideoFrameBufferSize;
       }
     }
-  }
 
   return UVC_SUCCESS;
 }
@@ -6332,7 +6219,7 @@ uvc_error_t uvc_stream_ctrl(uvc_stream_handle_t *strmh, uvc_stream_ctrl_t *ctrl)
  */
 static uvc_frame_desc_t *_uvc_find_frame_desc_stream_if(uvc_streaming_interface_t *stream_if,
     uint16_t format_id, uint16_t frame_id) {
- 
+
   uvc_format_desc_t *format = NULL;
   uvc_frame_desc_t *frame = NULL;
 
@@ -6361,7 +6248,7 @@ uvc_frame_desc_t *uvc_find_frame_desc_stream(uvc_stream_handle_t *strmh,
  */
 uvc_frame_desc_t *uvc_find_frame_desc(uvc_device_handle_t *devh,
     uint16_t format_id, uint16_t frame_id) {
- 
+
   uvc_streaming_interface_t *stream_if;
   uvc_frame_desc_t *frame;
 
@@ -6408,16 +6295,15 @@ uvc_error_t uvc_get_stream_ctrl_format_size(
 
         uint32_t *interval;
 
-        ctrl->bInterfaceNumber = stream_if->bInterfaceNumber;
-        UVC_DEBUG("claiming streaming interface %d", stream_if->bInterfaceNumber );
-        uvc_claim_if(devh, ctrl->bInterfaceNumber);
-        /* get the max values */
-        uvc_query_stream_ctrl( devh, ctrl, 1, UVC_GET_MAX);
-
         if (frame->intervals) {
           for (interval = frame->intervals; *interval; ++interval) {
             // allow a fps rate of zero to mean "accept first rate available"
             if (10000000 / *interval == (unsigned int) fps || fps == 0) {
+
+              /* get the max values -- we need the interface number to be able
+                 to do this */
+              ctrl->bInterfaceNumber = stream_if->bInterfaceNumber;
+              uvc_query_stream_ctrl( devh, ctrl, 1, UVC_GET_MAX);
 
               ctrl->bmHint = (1 << 0); /* don't negotiate interval */
               ctrl->bFormatIndex = format->bFormatIndex;
@@ -6428,7 +6314,7 @@ uvc_error_t uvc_get_stream_ctrl_format_size(
             }
           }
         } else {
-          uint32_t interval_100ns = 10000000 / fps;
+          uint32_t interval_100ns = ((fps == 0) ? frame->dwMinFrameInterval : 10000000 / fps);
           uint32_t interval_offset = interval_100ns - frame->dwMinFrameInterval;
 
           if (interval_100ns >= frame->dwMinFrameInterval
@@ -6436,12 +6322,20 @@ uvc_error_t uvc_get_stream_ctrl_format_size(
               && !(interval_offset
                    && (interval_offset % frame->dwFrameIntervalStep))) {
 
+            /* get the max values -- we need the interface number to be able
+               to do this */
+            ctrl->bInterfaceNumber = stream_if->bInterfaceNumber;
+            uvc_query_stream_ctrl( devh, ctrl, 1, UVC_GET_MAX);
+
             ctrl->bmHint = (1 << 0);
             ctrl->bFormatIndex = format->bFormatIndex;
             ctrl->bFrameIndex = frame->bFrameIndex;
             ctrl->dwFrameInterval = interval_100ns;
 
             goto found;
+          }
+          else {
+            printf("Frame interval did not match\n");
           }
         }
       }
@@ -6463,7 +6357,9 @@ found:
 uvc_error_t uvc_probe_stream_ctrl(
     uvc_device_handle_t *devh,
     uvc_stream_ctrl_t *ctrl) {
- 
+
+  uvc_claim_if(devh, ctrl->bInterfaceNumber);
+
   uvc_query_stream_ctrl(
       devh, ctrl, 1, UVC_SET_CUR
   );
@@ -6504,7 +6400,7 @@ void _uvc_swap_buffers(uvc_stream_handle_t *strmh) {
 
 /** @internal
  * @brief Process a payload transfer
- * 
+ *
  * Processes stream, places frames into buffer, signals listeners
  * (such as user callback thread and any polling thread) on new frame
  *
@@ -6516,6 +6412,7 @@ void _uvc_process_payload(uvc_stream_handle_t *strmh, uint8_t *payload, size_t p
   size_t header_len;
   uint8_t header_info;
   size_t data_len;
+  struct libusb_iso_packet_descriptor *pkt;
 
   /* magic numbers for identifying header packets from some iSight cameras */
   static uint8_t isight_tag[] = {
@@ -6633,14 +6530,15 @@ void LIBUSB_CALL _uvc_stream_callback(struct libusb_transfer *transfer) {
           continue;
         }
 
-        pktbuf = libusb_get_iso_packet_buffer_simple(transfer, packet_id);
+        if (pkt->actual_length > 0) {
+            pktbuf = libusb_get_iso_packet_buffer_simple(transfer, packet_id);
 
-        _uvc_process_payload(strmh, pktbuf, pkt->actual_length);
-
+            _uvc_process_payload(strmh, pktbuf, pkt->actual_length);
+        }
       }
     }
     break;
-  case LIBUSB_TRANSFER_CANCELLED: 
+  case LIBUSB_TRANSFER_CANCELLED:
   case LIBUSB_TRANSFER_ERROR:
   case LIBUSB_TRANSFER_NO_DEVICE: {
     int i;
@@ -6674,31 +6572,9 @@ void LIBUSB_CALL _uvc_stream_callback(struct libusb_transfer *transfer) {
     UVC_DEBUG("retrying transfer, status = %d", transfer->status);
     break;
   }
-  
-  if ( resubmit ) {
-    if ( strmh->running ) {
-      libusb_submit_transfer(transfer);
-    } else {
-      int i;
-      pthread_mutex_lock(&strmh->cb_mutex);
 
-      /* Mark transfer as deleted. */
-      for(i=0; i < LIBUVC_NUM_TRANSFER_BUFS; i++) {
-        if(strmh->transfers[i] == transfer) {
-          UVC_DEBUG("Freeing orphan transfer %d (%p)", i, transfer);
-          free(transfer->buffer);
-          libusb_free_transfer(transfer);
-          strmh->transfers[i] = NULL;
-        }
-      }
-      if(i == LIBUVC_NUM_TRANSFER_BUFS ) {
-        UVC_DEBUG("orphan transfer %p not found; not freeing!", transfer);
-      }
-
-      pthread_cond_broadcast(&strmh->cb_cond);
-      pthread_mutex_unlock(&strmh->cb_mutex);
-    }
-  }
+  if ( strmh->running && resubmit )
+    libusb_submit_transfer(transfer);
 }
 
 /** Begin streaming video from the camera into the callback function.
@@ -6725,7 +6601,7 @@ uvc_error_t uvc_start_streaming(
   if (ret != UVC_SUCCESS)
     return ret;
 
-  ret = uvc_stream_start(strmh, cb, user_ptr, flags);
+  ret = uvc_stream_start(strmh, cb, user_ptr,2, flags);
   if (ret != UVC_SUCCESS) {
     uvc_stream_close(strmh);
     return ret;
@@ -6774,7 +6650,7 @@ static uvc_streaming_interface_t *_uvc_get_stream_if(uvc_device_handle_t *devh, 
     if (stream_if->bInterfaceNumber == interface_idx)
       return stream_if;
   }
-  
+
   return NULL;
 }
 
@@ -6826,7 +6702,7 @@ uvc_error_t uvc_stream_open_ctrl(uvc_device_handle_t *devh, uvc_stream_handle_t 
   /** @todo take only what we need */
   strmh->outbuf = malloc( LIBUVC_XFER_BUF_SIZE );
   strmh->holdbuf = malloc( LIBUVC_XFER_BUF_SIZE );
-   
+
   pthread_mutex_init(&strmh->cb_mutex, NULL);
   pthread_cond_init(&strmh->cb_cond, NULL);
 
@@ -6849,6 +6725,7 @@ fail:
  *
  * @param strmh UVC stream
  * @param cb   User callback function. See {uvc_frame_callback_t} for restrictions.
+ * @param bandwidth_factor   Compression factor for mjpeg bandwidth estimation. Default 2 is save. 1 is often not enough. Differnt cameras require different minimums.
  * @param flags Stream setup flags, currently undefined. Set this to zero. The lower bit
  * is reserved for backward compatibility.
  */
@@ -6856,6 +6733,7 @@ uvc_error_t uvc_stream_start(
     uvc_stream_handle_t *strmh,
     uvc_frame_callback_t *cb,
     void *user_ptr,
+    float bandwidth_factor,
     uint8_t flags
 ) {
   /* USB interface we'll be using */
@@ -6867,7 +6745,7 @@ uvc_error_t uvc_stream_start(
   uvc_stream_ctrl_t *ctrl;
   uvc_error_t ret;
   /* Total amount of data per transfer */
-  size_t total_transfer_size = 0;
+  size_t total_transfer_size;
   struct libusb_transfer *transfer;
   int transfer_id;
 
@@ -6881,7 +6759,7 @@ uvc_error_t uvc_stream_start(
   }
 
   strmh->running = 1;
-  strmh->seq = 1;
+  strmh->seq = 0;
   strmh->fid = 0;
   strmh->pts = 0;
   strmh->last_scr = 0;
@@ -6910,20 +6788,32 @@ uvc_error_t uvc_stream_start(
   if (isochronous) {
     /* For isochronous streaming, we choose an appropriate altsetting for the endpoint
      * and set up several transfers */
-    const struct libusb_interface_descriptor *altsetting = 0;
+    const struct libusb_interface_descriptor *altsetting;
     const struct libusb_endpoint_descriptor *endpoint;
     /* The greatest number of bytes that the device might provide, per packet, in this
      * configuration */
     size_t config_bytes_per_packet;
     /* Number of packets per transfer */
-    size_t packets_per_transfer = 0;
+    size_t packets_per_transfer;
     /* Size of packet transferable from the chosen endpoint */
-    size_t endpoint_bytes_per_packet = 0;
+    size_t endpoint_bytes_per_packet;
     /* Index of the altsetting */
     int alt_idx, ep_idx;
-    
+
+    //the proper way: ask the cmaera
     config_bytes_per_packet = strmh->cur_ctrl.dwMaxPayloadTransferSize;
 
+
+    // our way: estimate it:
+    size_t bandwidth = frame_desc->wWidth * frame_desc->wHeight / 8 * bandwidth_factor; //the last one is bpp default 4 but we use if for compression, 2 is save, 1.5 is needed to run 3 high speed cameras. on one bus.
+    bandwidth *= 10000000 / strmh->cur_ctrl.dwFrameInterval + 1;
+    bandwidth /= 1000; //unit
+    bandwidth /= 8; // 8 high speed usb microframes per ms
+    bandwidth += 12; //header size
+    config_bytes_per_packet = bandwidth;
+
+
+    // config_bytes_per_packet /= 2;
     /* Go through the altsettings and find one whose packets are at least
      * as big as our format's maximum per-packet usage. Assume that the
      * packet sizes are increasing. */
@@ -6944,16 +6834,21 @@ uvc_error_t uvc_stream_start(
         }
       }
 
+
       if (endpoint_bytes_per_packet >= config_bytes_per_packet) {
+        printf("Estimated / selected altsetting bandwith : %zu / %zu. \n",config_bytes_per_packet,endpoint_bytes_per_packet);
+
         /* Transfers will be at most one frame long: Divide the maximum frame size
          * by the size of the endpoint and round up */
         packets_per_transfer = (ctrl->dwMaxVideoFrameSize +
                                 endpoint_bytes_per_packet - 1) / endpoint_bytes_per_packet;
-
+        // packets_per_transfer = (ctrl->dwMaxVideoFrameSize +
+        //                         endpoint_bytes_per_packet - 1) / endpoint_bytes_per_packet;
+        // frame_desc
         /* But keep a reasonable limit: Otherwise we start dropping data */
         if (packets_per_transfer > 32)
           packets_per_transfer = 32;
-        
+
         total_transfer_size = packets_per_transfer * endpoint_bytes_per_packet;
         break;
       }
@@ -6977,7 +6872,7 @@ uvc_error_t uvc_stream_start(
     /* Set up the transfers */
     for (transfer_id = 0; transfer_id < LIBUVC_NUM_TRANSFER_BUFS; ++transfer_id) {
       transfer = libusb_alloc_transfer(packets_per_transfer);
-      strmh->transfers[transfer_id] = transfer;      
+      strmh->transfers[transfer_id] = transfer;
       strmh->transfer_bufs[transfer_id] = malloc(total_transfer_size);
 
       libusb_fill_iso_transfer(
@@ -7016,18 +6911,9 @@ uvc_error_t uvc_stream_start(
       transfer_id++) {
     ret = libusb_submit_transfer(strmh->transfers[transfer_id]);
     if (ret != UVC_SUCCESS) {
-      UVC_DEBUG("libusb_submit_transfer failed: %d",ret);
+      UVC_DEBUG("libusb_submit_transfer failed");
       break;
     }
-  }
-
-  if ( ret != UVC_SUCCESS && transfer_id > 0 ) {
-    for ( ; transfer_id < LIBUVC_NUM_TRANSFER_BUFS; transfer_id++) {
-      free ( strmh->transfers[transfer_id]->buffer );
-      libusb_free_transfer ( strmh->transfers[transfer_id]);
-      strmh->transfers[transfer_id] = 0;
-    }
-    ret = UVC_SUCCESS;
   }
 
   UVC_EXIT(ret);
@@ -7054,7 +6940,7 @@ uvc_error_t uvc_stream_start_iso(
     uvc_frame_callback_t *cb,
     void *user_ptr
 ) {
-  return uvc_stream_start(strmh, cb, user_ptr, 0);
+  return uvc_stream_start(strmh, cb, user_ptr,2, 0);
 }
 
 /** @internal
@@ -7078,13 +6964,15 @@ void *_uvc_user_caller(void *arg) {
       pthread_mutex_unlock(&strmh->cb_mutex);
       break;
     }
-    
+
     last_seq = strmh->hold_seq;
     _uvc_populate_frame(strmh);
-    
+
     pthread_mutex_unlock(&strmh->cb_mutex);
-    
-    strmh->user_cb(&strmh->frame, strmh->user_ptr);
+
+    if (strmh->hold_bytes == strmh->cur_ctrl.dwMaxVideoFrameSize ||
+            strmh->transfers[0]->num_iso_packets == 0)
+        strmh->user_cb(&strmh->frame, strmh->user_ptr);
   } while(1);
 
   return NULL; // return value ignored
@@ -7095,6 +6983,7 @@ void *_uvc_user_caller(void *arg) {
  * must be called with stream cb lock held!
  */
 void _uvc_populate_frame(uvc_stream_handle_t *strmh) {
+  size_t alloc_size = strmh->cur_ctrl.dwMaxVideoFrameSize;
   uvc_frame_t *frame = &strmh->frame;
   uvc_frame_desc_t *frame_desc;
 
@@ -7107,13 +6996,23 @@ void _uvc_populate_frame(uvc_stream_handle_t *strmh) {
 				   strmh->cur_ctrl.bFrameIndex);
 
   frame->frame_format = strmh->frame_format;
-  
+
   frame->width = frame_desc->wWidth;
   frame->height = frame_desc->wHeight;
-  
+
   switch (frame->frame_format) {
+  case UVC_FRAME_FORMAT_RGB:
+    frame->step = frame->width * 3;
+    break;
   case UVC_FRAME_FORMAT_YUYV:
+  case UVC_FRAME_FORMAT_UYVY:
+  case UVC_FRAME_FORMAT_RGBR:
     frame->step = frame->width * 2;
+    break;
+  case UVC_FRAME_FORMAT_NV12:
+  case UVC_FRAME_FORMAT_I420:
+  case UVC_FRAME_FORMAT_GRAY8:
+    frame->step = frame->width;
     break;
   case UVC_FRAME_FORMAT_MJPEG:
     frame->step = 0;
@@ -7123,18 +7022,11 @@ void _uvc_populate_frame(uvc_stream_handle_t *strmh) {
     break;
   }
 
-  frame->sequence = strmh->hold_seq;
   /** @todo set the frame time */
-  // frame->capture_time
-
-  /* copy the image data from the hold buffer to the frame (unnecessary extra buf?) */
-  if (frame->data_bytes < strmh->hold_bytes) {
-    frame->data = realloc(frame->data, strmh->hold_bytes);
-  }
+  frame->sequence = strmh->hold_seq;
+  frame->capture_time.tv_usec = strmh->hold_pts;
   frame->data_bytes = strmh->hold_bytes;
-  memcpy(frame->data, strmh->holdbuf, frame->data_bytes);
-
-
+  frame->data = strmh->holdbuf;
 
 }
 
@@ -7169,51 +7061,42 @@ uvc_error_t uvc_stream_get_frame(uvc_stream_handle_t *strmh,
     if (timeout_us == 0) {
       pthread_cond_wait(&strmh->cb_cond, &strmh->cb_mutex);
     } else {
-      add_secs = timeout_us / 1000000;
-      add_nsecs = (timeout_us % 1000000) * 1000;
+      add_secs = timeout_us / 1e6;
+      add_nsecs = (timeout_us % (int)1e6) * 1e3;
       ts.tv_sec = 0;
       ts.tv_nsec = 0;
 
-#if _POSIX_TIMERS > 0
+#if _POSIX_TIMERS > 0 //linux
       clock_gettime(CLOCK_REALTIME, &ts);
-#else
+#else //windows
       gettimeofday(&tv, NULL);
       ts.tv_sec = tv.tv_sec;
       ts.tv_nsec = tv.tv_usec * 1000;
 #endif
-
       ts.tv_sec += add_secs;
       ts.tv_nsec += add_nsecs;
 
-      /* pthread_cond_timedwait FAILS with EINVAL if ts.tv_nsec > 1000000000 (1 billion)
-       * Since we are just adding values to the timespec, we have to increment the seconds if nanoseconds is greater than 1 billion,
-       * and then re-adjust the nanoseconds in the correct range.
-       * */
-      ts.tv_sec += ts.tv_nsec / 1000000000;
-      ts.tv_nsec = ts.tv_nsec % 1000000000;
+#ifdef __APPLE__
+      // use a custom fn instead
+      ts = get_abs_future_time_coarse(timeout_us/1000);
+#endif
 
-      int err = pthread_cond_timedwait(&strmh->cb_cond, &strmh->cb_mutex, &ts);
-
-      //TODO: How should we handle EINVAL?
-      switch(err){
-      case EINVAL:
-          *frame = NULL;
-          return UVC_ERROR_OTHER;
-      case ETIMEDOUT:
-          *frame = NULL;
-          return UVC_ERROR_TIMEOUT;
-      }
+      pthread_cond_timedwait(&strmh->cb_cond, &strmh->cb_mutex, &ts);
     }
-    
+
     if (strmh->last_polled_seq < strmh->hold_seq) {
       _uvc_populate_frame(strmh);
       *frame = &strmh->frame;
       strmh->last_polled_seq = strmh->hold_seq;
     } else {
       *frame = NULL;
+      pthread_mutex_unlock(&strmh->cb_mutex);
+      return UVC_ERROR_TIMEOUT;
     }
   } else {
     *frame = NULL;
+    pthread_mutex_unlock(&strmh->cb_mutex);
+    return UVC_ERROR_BUSY;
   }
 
   pthread_mutex_unlock(&strmh->cb_mutex);
@@ -7244,8 +7127,11 @@ void uvc_stop_streaming(uvc_device_handle_t *devh) {
  * @param devh UVC device
  */
 uvc_error_t uvc_stream_stop(uvc_stream_handle_t *strmh) {
-  int i;
-
+  int i,timeout_us= 1000000,ret=UVC_SUCCESS;
+  time_t add_secs;
+  time_t add_nsecs;
+  struct timespec ts;
+  struct timeval tv;
   if (!strmh->running)
     return UVC_ERROR_INVALID_PARAM;
 
@@ -7272,7 +7158,29 @@ uvc_error_t uvc_stream_stop(uvc_stream_handle_t *strmh) {
     }
     if(i == LIBUVC_NUM_TRANSFER_BUFS )
       break;
-    pthread_cond_wait(&strmh->cb_cond, &strmh->cb_mutex);
+    // this ones sometimes does not return.
+    // pthread_cond_wait(&strmh->cb_cond, &strmh->cb_mutex);
+
+    add_secs = timeout_us / 1000000;
+    add_nsecs = (timeout_us % 1000000) * 1000;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 0;
+
+#if _POSIX_TIMERS > 0
+    clock_gettime(CLOCK_REALTIME, &ts);
+#else
+    gettimeofday(&tv, NULL);
+    ts.tv_sec = tv.tv_sec;
+    ts.tv_nsec = tv.tv_usec * 1000;
+#endif
+
+    ts.tv_sec += add_secs;
+    ts.tv_nsec += add_nsecs;
+
+    if (ETIMEDOUT == pthread_cond_timedwait(&strmh->cb_cond, &strmh->cb_mutex, &ts)){
+      ret = UVC_ERROR_TIMEOUT;
+      break;
+      }
   } while(1);
   // Kick the user thread awake
   pthread_cond_broadcast(&strmh->cb_cond);
@@ -7286,7 +7194,7 @@ uvc_error_t uvc_stream_stop(uvc_stream_handle_t *strmh) {
     pthread_join(strmh->cb_thread, NULL);
   }
 
-  return UVC_SUCCESS;
+  return ret;
 }
 
 /** @brief Close stream.
@@ -7302,9 +7210,6 @@ void uvc_stream_close(uvc_stream_handle_t *strmh) {
 
   uvc_release_if(strmh->devh, strmh->stream_if->bInterfaceNumber);
 
-  if (strmh->frame.data)
-    free(strmh->frame.data);
-
   free(strmh->outbuf);
   free(strmh->holdbuf);
 
@@ -7315,7 +7220,7 @@ void uvc_stream_close(uvc_stream_handle_t *strmh) {
   free(strmh);
 }
 
-/*------frame.c------*/
+/* frame.c */
 
 /*********************************************************************
 * Software License Agreement (BSD License)
@@ -7354,7 +7259,6 @@ void uvc_stream_close(uvc_stream_handle_t *strmh) {
  * @defgroup frame Frame processing
  * @brief Tools for managing frame buffers and converting between image formats
  */
-
 /*
 #include "libuvc/libuvc.h"
 #include "libuvc/libuvc_internal.h"
@@ -7732,6 +7636,59 @@ uvc_error_t uvc_uyvy2bgr(uvc_frame_t *in, uvc_frame_t *out) {
   return UVC_SUCCESS;
 }
 
+#define II4202BGR_2(pyuv, pbgr) { \
+    int r = (22987 * ((pyuv)[2] - 128)) >> 14; \
+    int g = (-5636 * ((pyuv)[0] - 128) - 11698 * ((pyuv)[2] - 128)) >> 14; \
+    int b = (29049 * ((pyuv)[0] - 128)) >> 14; \
+    (pbgr)[0] = sat((pyuv)[1] + b); \
+    (pbgr)[1] = sat((pyuv)[1] + g); \
+    (pbgr)[2] = sat((pyuv)[1] + r); \
+    (pbgr)[3] = sat((pyuv)[3] + b); \
+    (pbgr)[4] = sat((pyuv)[3] + g); \
+    (pbgr)[5] = sat((pyuv)[3] + r); \
+    }
+#define II4202BGR_16(pyuv, pbgr) IUYVY2BGR_8(pyuv, pbgr); IUYVY2BGR_8(pyuv + 16, pbgr + 24);
+#define II4202BGR_8(pyuv, pbgr) IUYVY2BGR_4(pyuv, pbgr); IUYVY2BGR_4(pyuv + 8, pbgr + 12);
+#define II4202BGR_4(pyuv, pbgr) IUYVY2BGR_2(pyuv, pbgr); IUYVY2BGR_2(pyuv + 4, pbgr + 6);
+
+/** @brief Convert a frame from I420 to BGR
+ * @ingroup frame
+ * @param ini UYVY frame
+ * @param out BGR frame
+ */
+uvc_error_t uvc_i4202bgr(uvc_frame_t *in, uvc_frame_t *out) {
+  if (in->frame_format != UVC_FRAME_FORMAT_I420)
+    return UVC_ERROR_INVALID_PARAM;
+
+  if (uvc_ensure_frame_size(out, in->width * in->height * 3) < 0)
+    return UVC_ERROR_NO_MEM;
+
+  out->width = in->width;
+  out->height = in->height;
+  out->frame_format = UVC_FRAME_FORMAT_BGR;
+  out->step = in->width *3;
+  out->sequence = in->sequence;
+  out->capture_time = in->capture_time;
+  out->source = in->source;
+
+  uint8_t *pyuv = in->data;
+  uint8_t *pbgr = out->data;
+  uint8_t *pbgr_end = pbgr + out->data_bytes;
+
+  while (pbgr < pbgr_end) {
+    IUYVY2BGR_8(pyuv, pbgr);
+
+    pbgr += 3 * 8;
+    pyuv += 1 * 8;
+  }
+
+  return UVC_SUCCESS;
+}
+
+uvc_error_t uvc_i4202rgb(uvc_frame_t *in, uvc_frame_t *out) {
+  return uvc_i4202bgr(in, out);
+}
+
 /** @brief Convert a frame to RGB
  * @ingroup frame
  *
@@ -7744,6 +7701,8 @@ uvc_error_t uvc_any2rgb(uvc_frame_t *in, uvc_frame_t *out) {
       return uvc_yuyv2rgb(in, out);
     case UVC_FRAME_FORMAT_UYVY:
       return uvc_uyvy2rgb(in, out);
+    case UVC_FRAME_FORMAT_I420:
+      return uvc_i4202rgb(in, out);
     case UVC_FRAME_FORMAT_RGB:
       return uvc_duplicate_frame(in, out);
     default:
@@ -7763,6 +7722,8 @@ uvc_error_t uvc_any2bgr(uvc_frame_t *in, uvc_frame_t *out) {
       return uvc_yuyv2bgr(in, out);
     case UVC_FRAME_FORMAT_UYVY:
       return uvc_uyvy2bgr(in, out);
+    case UVC_FRAME_FORMAT_I420:
+      return uvc_i4202bgr(in, out);
     case UVC_FRAME_FORMAT_BGR:
       return uvc_duplicate_frame(in, out);
     default:
