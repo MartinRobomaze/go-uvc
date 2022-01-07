@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	gouvc "github.com/ginuerzh/go-uvc"
+	gouvc "github.com/MartinRobomaze/go-uvc"
 )
 
 func main() {
