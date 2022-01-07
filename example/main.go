@@ -59,34 +59,20 @@ func main() {
 		}
 	}
 
-	var frameFormat gouvc.FrameFormat = gouvc.FRAME_FORMAT_MJPEG
-	/*
-		// formatDesc := dev.FormatDescriptors()
-		// log.Println("format desc:\n", formatDesc)
+	formatDesc := dev.GetFormatDesc()
 
-		switch formatDesc.Subtype {
-		case gouvc.VS_FORMAT_MJPEG:
-			frameFormat = gouvc.FRAME_FORMAT_MJPEG
-		case gouvc.VS_FORMAT_FRAME_BASED:
-			// frameFormat = gouvc.FRAME_FORMAT_H264
-		default:
-			frameFormat = gouvc.FRAME_FORMAT_YUYV
-		}
+	frameFormat := gouvc.FRAME_FORMAT_Y16
 
-		width := 640
-		height := 480
-		fps := 30
+	frameDesc := formatDesc.FrameDescriptors()
 
-		for _, frameDesc := range formatDesc.FrameDescriptors() {
-			log.Println("frame desc:\n", frameDesc)
+	fmt.Println(frameDesc)
 
-			if width == int(frameDesc.Width) && height == int(frameDesc.Height) {
-				fps = int(10000000 / frameDesc.DefaultFrameInterval)
-			}
-		}
-	*/
-
-	stream, err := dev.GetStream(frameFormat, 1920, 1080, 25)
+	stream, err := dev.GetStream(
+		frameFormat,
+		int(frameDesc[0].Width),
+		int(frameDesc[0].Height),
+		int(10000000/frameDesc[0].DefaultFrameInterval),
+	)
 	if err != nil {
 		log.Fatal("get stream:", err)
 	}
