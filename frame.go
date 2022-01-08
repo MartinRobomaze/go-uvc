@@ -3,8 +3,6 @@ package uvc
 // #include <libuvc-binding.h>
 import "C"
 import (
-	"bytes"
-	"io"
 	"log"
 	"time"
 	"unsafe"
@@ -16,25 +14,25 @@ type FrameFormat C.enum_uvc_frame_format
 
 const (
 	FRAME_FORMAT_UNKNOWN FrameFormat = C.UVC_FRAME_FORMAT_UNKNOWN
-	// Any supported format
+	// FRAME_FORMAT_ANY Any supported format
 	FRAME_FORMAT_ANY          FrameFormat = C.UVC_FRAME_FORMAT_ANY
 	FRAME_FORMAT_UNCOMPRESSED FrameFormat = C.UVC_FRAME_FORMAT_UNCOMPRESSED
 	FRAME_FORMAT_COMPRESSED   FrameFormat = C.UVC_FRAME_FORMAT_COMPRESSED
-	// YUYV/YUV2/YUV422: YUV encoding with one luminance value per pixel and
+	// FRAME_FORMAT_YUYV YUYV/YUV2/YUV422: YUV encoding with one luminance value per pixel and
 	// one UV (chrominance) pair for every two pixels.
 	FRAME_FORMAT_YUYV FrameFormat = C.UVC_FRAME_FORMAT_YUYV
 	FRAME_FORMAT_UYVY FrameFormat = C.UVC_FRAME_FORMAT_UYVY
-	// 24-bit RGB
+	// FRAME_FORMAT_RGB 24-bit RGB
 	FRAME_FORMAT_RGB FrameFormat = C.UVC_FRAME_FORMAT_RGB
 	FRAME_FORMAT_BGR FrameFormat = C.UVC_FRAME_FORMAT_BGR
-	// Motion-JPEG (or JPEG) encoded images
+	// FRAME_FORMAT_MJPEG Motion-JPEG (or JPEG) encoded images
 	FRAME_FORMAT_MJPEG FrameFormat = C.UVC_FRAME_FORMAT_MJPEG
-	// Greyscale images
-	FRAME_FORMAT_GRAY8  FrameFormat = C.UVC_FRAME_FORMAT_GRAY8
-	FRAME_FORMAT_Y16 FrameFormat = C.UVC_FRAME_FORMAT_Y16
-	// Raw colour mosaic images
-	FRAME_FORMAT_BY8    FrameFormat = C.UVC_FRAME_FORMAT_BY8
-	// Number of formats understood
+	// FRAME_FORMAT_GRAY8 Greyscale images
+	FRAME_FORMAT_GRAY8 FrameFormat = C.UVC_FRAME_FORMAT_GRAY8
+	FRAME_FORMAT_Y16   FrameFormat = C.UVC_FRAME_FORMAT_Y16
+	// FRAME_FORMAT_BY8 Raw colour mosaic images
+	FRAME_FORMAT_BY8 FrameFormat = C.UVC_FRAME_FORMAT_BY8
+	// FRAME_FORMAT_COUNT Number of formats understood
 	FRAME_FORMAT_COUNT FrameFormat = C.UVC_FRAME_FORMAT_COUNT
 )
 
@@ -58,15 +56,11 @@ type Frame struct {
 	// If false, the data buffer will not be reallocated or freed by the library.
 	LibraryOwned bool
 	// Image data for this frame
-	data io.Reader
+	Data []int16
 	//  Metadata for this frame if available
 	Metadata []byte
 
 	frame *C.struct_uvc_frame
-}
-
-func (fr *Frame) Read(b []byte) (int, error) {
-	return fr.data.Read(b)
 }
 
 //export go_frame_cb
@@ -90,6 +84,8 @@ func go_frame_cb(frame *C.struct_uvc_frame, p unsafe.Pointer) {
 		frame = bgr
 	}
 
+	data := (*[19200]int16)(unsafe.Pointer(frame.data))
+
 	fr := &Frame{
 		Width:        int(frame.width),
 		Height:       int(frame.height),
@@ -98,7 +94,7 @@ func go_frame_cb(frame *C.struct_uvc_frame, p unsafe.Pointer) {
 		Sequence:     uint32(frame.sequence),
 		LibraryOwned: frame.library_owns_data > 0,
 		CaptureTime:  time.Unix(int64(frame.capture_time.tv_sec), int64(frame.capture_time.tv_usec)*1000),
-		data:         bytes.NewReader(C.GoBytes(unsafe.Pointer(frame.data), C.int(frame.data_bytes))),
+		Data:         data[:],
 		// Metadata:     C.GoBytes(unsafe.Pointer(frame.metadata), C.int(frame.metadata_bytes)),
 		frame: frame,
 	}

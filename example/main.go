@@ -2,9 +2,7 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
-	"os"
 	"time"
 
 	gouvc "github.com/MartinRobomaze/go-uvc"
@@ -98,20 +96,10 @@ func main() {
 		case frame := <-cf:
 			log.Printf("got image: %d, %dx%d, %s",
 				frame.Sequence, frame.Width, frame.Height, frame.CaptureTime)
-			if err := writeFrameFile(frame, fmt.Sprintf("frame%d.jpg", frame.Sequence)); err != nil {
-				log.Fatal("write frame:", err)
-			}
+
+			log.Println(frame.Data)
 		case <-tc:
 			return
 		}
 	}
-}
-
-func writeFrameFile(r io.Reader, name string) error {
-	f, err := os.Create(name)
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(f, r)
-	return err
 }
